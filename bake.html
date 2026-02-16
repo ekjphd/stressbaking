@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fluffy Pumpkin Cheesecake — Vanilla JS</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Tailwind via CDN (no build step) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-amber-50 font-serif">
+  <div id="app" class="p-4 md:p-8"></div>
+
+  <script>
+    // ---------- constants ----------
+    const STORAGE_KEY = "critical-baking-reflections";
+
+    const DEFAULT_REFLECTIONS = [
+      "My co-author: 'There's something meditative about watching the cream cheese transform from blocky to smooth. Like maybe if I beat it long enough, my own edges will soften too.'",
+      "Me: 'The recipe says medium speed. I always want to go faster. I have to remind myself that rushing only makes it worse — the cream cheese, and most other things.'",
+      "My co-author: 'I cracked an egg directly onto the counter instead of into the bowl. Again. The recipe doesn't mention what to do when your hands are shaking.'",
+      "Me: 'There's something about stirring pumpkin into cream cheese that feels like an act of trust. Two things that don't seem to belong together, becoming something new.'",
+      "My co-author: 'The pouring is supposed to be smooth but mine always glugs. At least when baking, the mess is contained. Expected. Not like the rest of it.'",
+      "Me: 'I set the timer and walked away. That's the hardest part — doing what you can, then surrendering to the heat.'",
+      "My co-author: 'The waiting is the hardest part. You can't rush a cheesecake. You can't rush anything, really, but at least with this I know exactly how long to wait.'",
+      "Me: 'Three hours in the refrigerator. The recipe is done, but the anxiety isn't. It never is. At least there's cheesecake.'"
+    ];
+
+    const steps = [
+      {
+        label: "Beat cream cheese",
+        instruction: "In a large mixing bowl, beat cream cheese on medium speed of electric mixer until fluffy.",
+        ingredients: [
+          { id: "cc1", name: "Cream cheese (8oz)", color: "#FFF8E7", type: "block" },
+          { id: "cc2", name: "Cream cheese (8oz)", color: "#FFF8E7", type: "block" }
+        ],
+        visual: "mixer"
+      },
+      {
+        label: "Add sugar & spice",
+        instruction: "Add sugar and pumpkin pie spice to the cream cheese. Beat until combined.",
+        ingredients: [
+          { id: "sugar", name: "Sugar (1/2 cup)", color: "#FFFFFF", type: "sugar" },
+          { id: "spice", name: "Pumpkin pie spice", color: "#8B4513", type: "spice" }
+        ],
+        visual: "mixer"
+      },
+      {
+        label: "Add eggs",
+        instruction: "Add eggs one at a time, mixing until just combined after each addition.",
+        ingredients: [
+          { id: "egg1", name: "Egg", color: "#FFE5B4", type: "egg" },
+          { id: "egg2", name: "Egg", color: "#FFE5B4", type: "egg" },
+          { id: "egg3", name: "Egg", color: "#FFE5B4", type: "egg" }
+        ],
+        visual: "mixer"
+      },
+      {
+        label: "Stir in pumpkin",
+        instruction: "Stir in 1 cup canned pumpkin until fully incorporated.",
+        ingredients: [
+          { id: "pumpkin", name: "Pumpkin (1 cup)", color: "#FF7518", type: "pumpkin" }
+        ],
+        visual: "mixer"
+      },
+      {
+        label: "Pour into crust",
+        instruction: "Pour the filling into your graham cracker pie crust.",
+        ingredients: [],
+        visual: "pour"
+      },
+      {
+        label: "Bake",
+        instruction: "Bake at 350°F for 30 to 35 minutes, or until center is almost set.",
+        ingredients: [],
+        visual: "oven"
+      },
+      {
+        label: "Cool on rack",
+        instruction: "Remove from oven. Cool for 1 hour on a wire rack.",
+        ingredients: [],
+        visual: "cool"
+      },
+      {
+        label: "Refrigerate",
+        instruction: "Refrigerate at least 3 hours before serving.",
+        ingredients: [],
+        visual: "done"
+      }
+    ];
+
+    // ---------- simple async storage wrapper (localStorage) ----------
+    const storage = {
+      get: (key) => new Promise((resolve) => {
+        try {
+          const value = localStorage.getItem(key);
+          resolve({ value });
+        } catch (e) {
+          resolve({ value: null });
+        }
+      }),
+      set: (key, value) => new Promise((resolve) => {
+        try {
+          localStorage.setItem(key, value);
+        } catch {}
+        resolve();
+      })
+    };
+
+    // ---------- state ----------
+    const state = {
+      step: 0,
+      used: [],
+      blending: false,
+      mixContents: [],
+      splatters: [],
+      showReflection: false,
+      editMode: false,
+      reflections: [...DEFAULT_REFLECTIONS],
+      drafts: [...DEFAULT_REFLECTIONS],
+      saving: false,
+      storageReady: false
+    };
+
+    // ---------- visuals (SVG as string builders) ----------
+    function ingredientIcon(type, used) {
+      const op = used ? "opacity-30" : "";
+      if (type === "pumpkin") {
+        return `
+          <svg width="54" height="72" viewBox="0 0 60 80" class="${op}">
+            <rect x="5" y="8" width="50" height="64" fill="#E86825" stroke="#C24F1A" stroke-width="1.5" rx="2"></rect>
+            <ellipse cx="30" cy="8" rx="25" ry="4" fill="#D85F1F" stroke="#C24F1A" stroke-width="1"></ellipse>
+            <ellipse cx="30" cy="72" rx="25" ry="4" fill="#D85F1F" stroke="#C24F1A" stroke-width="1"></ellipse>
+            <rect x="8" y="18" width="44" height="46" fill="#F5F5F0" rx="1"></rect>
+            <text x="30" y="28" font-size="9" font-weight="bold" fill="#E86825" text-anchor="middle" font-family="serif">LIBBY'S</text>
+            <circle cx="30" cy="45" r="12" fill="#FF8C42" opacity="0.8"></circle>
+            <ellipse cx="26" cy="45" rx="8" ry="11" fill="#FF8C42" opacity="0.6"></ellipse>
+            <ellipse cx="34" cy="45" rx="8" ry="11" fill="#FF8C42" opacity="0.6"></ellipse>
+            <rect x="28" y="36" width="4" height="4" fill="#8B4513" rx="1"></rect>
+            <text x="30" y="68" font-size="5" fill="#333" text-anchor="middle" font-family="sans-serif">PUMPKIN</text>
+          </svg>
+        `;
+      }
+      const icons = { block: "🧈", sugar: "🥄", spice: "✨", egg: "🥚" };
+      const emoji = icons[type] || "❓";
+      return `<div class="text-4xl ${op}">${emoji}</div>`;
+    }
+
+    function mixerVisual(contents, blending) {
+      return `
+        <svg width="300" height="360" viewBox="0 0 320 380">
+          <path d="M 160 20 L 140 60 L 180 60 Z" fill="#E8E5DC" stroke="#D5D2C9" stroke-width="2"></path>
+          <rect x="140" y="10" width="40" height="15" fill="#E8E5DC" stroke="#D5D2C9" stroke-width="2" rx="3"></rect>
+          <ellipse cx="160" cy="80" rx="50" ry="35" fill="#E8E5DC" stroke="#D5D2C9" stroke-width="2"></ellipse>
+          <circle cx="190" cy="75" r="6" fill="#666" stroke="#444" stroke-width="1"></circle>
+          <line x1="190" y1="75" x2="190" y2="71" stroke="white" stroke-width="1.5"></line>
+          <ellipse cx="160" cy="115" rx="15" ry="6" fill="#C0C0C0" stroke="#A0A0A0" stroke-width="2"></ellipse>
+          <ellipse cx="160" cy="220" rx="90" ry="25" fill="#D8D8D8" stroke="#A0A0A0" stroke-width="2"></ellipse>
+          <path d="M 70 220 Q 65 310 85 330 Q 110 350 160 355 Q 210 350 235 330 Q 255 310 250 220" fill="#E8E8E8" stroke="#A0A0A0" stroke-width="2"></path>
+          <path d="M 250 250 Q 275 255 278 275 Q 278 295 250 300" fill="none" stroke="#A0A0A0" stroke-width="8" stroke-linecap="round"></path>
+          <path d="M 250 250 Q 271 255 274 275 Q 274 295 250 300" fill="none" stroke="#C8C8C8" stroke-width="5" stroke-linecap="round"></path>
+          <ellipse cx="130" cy="250" rx="40" ry="20" fill="white" opacity="0.4"></ellipse>
+          <line x1="160" y1="121" x2="160" y2="215" stroke="#B8B8B8" stroke-width="5"></line>
+
+          ${
+            contents.length > 0
+              ? `
+                <g>
+                  ${contents
+                    .map(
+                      (ing, i) =>
+                        `<circle cx="${135 + (i % 3) * 25}" cy="${
+                          250 + Math.floor(i / 3) * 22
+                        }" r="16" fill="${ing.color}" opacity="0.8" class="${
+                          blending ? "animate-pulse" : ""
+                        }"></circle>`
+                    )
+                    .join("")}
+                  ${
+                    contents.length > 1
+                      ? `<ellipse cx="160" cy="280" rx="70" ry="35" fill="${
+                          contents[contents.length - 1].color
+                        }" opacity="0.7"></ellipse>`
+                      : ""
+                  }
+                </g>
+              `
+              : ""
+          }
+
+          <rect x="140" y="215" width="40" height="8" rx="2" fill="#B8B8B8" stroke="#989898" stroke-width="1"></rect>
+          <rect x="145" y="223" width="30" height="6" rx="1" fill="#B8B8B8" stroke-width="1"></rect>
+          <rect x="148" y="229" width="24" height="5" rx="1" fill="#B8B8B8" stroke-width="1"></rect>
+        </svg>
+      `;
+    }
+
+    function pourVisual() {
+      return `
+        <svg width="320" height="400" viewBox="0 0 340 420">
+          <g transform="translate(60,-30) rotate(30,160,200)">
+            <ellipse cx="160" cy="200" rx="85" ry="24" fill="#D8D8D8" stroke="#A0A0A0" stroke-width="2"></ellipse>
+            <path d="M 75 200 Q 70 285 90 305 Q 115 325 160 330 Q 205 325 230 305 Q 250 285 245 200" fill="#E8E8E8" stroke="#A0A0A0" stroke-width="2"></path>
+            <ellipse cx="155" cy="240" rx="68" ry="22" fill="#F5A347" opacity="0.9"></ellipse>
+            <path d="M 87 240 Q 85 260 100 270 Q 120 280 155 283 Q 190 280 210 270 Q 223 260 223 240" fill="#E89436" opacity="0.85"></path>
+            <path d="M 245 230 Q 265 235 267 250 Q 267 265 245 270" fill="none" stroke="#A0A0A0" stroke-width="7" stroke-linecap="round"></path>
+          </g>
+          <path d="M 210 200 Q 200 260 190 300 Q 188 320 185 340" fill="none" stroke="#F5A347" stroke-width="18" opacity="0.85" stroke-linecap="round"></path>
+          <path d="M 212 205 Q 202 265 192 305 Q 190 325 187 340" fill="none" stroke="#FFC875" stroke-width="8" opacity="0.6" stroke-linecap="round"></path>
+          <ellipse cx="180" cy="340" rx="95" ry="24" fill="#F0F0F0" stroke="#C0C0C0" stroke-width="2"></ellipse>
+          <path d="M 85 340 Q 82 380 95 395 Q 115 410 180 415 Q 245 410 265 395 Q 278 380 275 340" fill="#FAFAFA" stroke="#C0C0C0" stroke-width="2"></path>
+          <ellipse cx="180" cy="352" rx="82" ry="8" fill="#E8D4A8" stroke="#D4B888" stroke-width="1.5"></ellipse>
+          <ellipse cx="180" cy="360" rx="80" ry="20" fill="#D4B888" stroke="#C4A878" stroke-width="2"></ellipse>
+          <path d="M 100 360 Q 98 380 110 390 Q 130 400 180 403 Q 230 400 250 390 Q 262 380 260 360" fill="#E8D4A8" stroke="#C4A878" stroke-width="2"></path>
+          <ellipse cx="180" cy="368" rx="72" ry="18" fill="#F5A347" opacity="0.95"></ellipse>
+          <ellipse cx="185" cy="345" rx="12" ry="8" fill="#F5A347" opacity="0.7"></ellipse>
+        </svg>
+      `;
+    }
+
+    function ovenVisual() {
+      return `
+        <svg width="280" height="300" viewBox="0 0 280 300">
+          <rect x="20" y="20" width="240" height="260" fill="#888" rx="10" stroke="#666" stroke-width="2"></rect>
+          <rect x="35" y="35" width="210" height="180" fill="#333" rx="4" stroke="#555" stroke-width="2"></rect>
+          <rect x="38" y="38" width="204" height="174" fill="#1a1a1a" rx="3"></rect>
+          ${[0,1,2,3].map(i => `<line x1="38" y1="${60 + i*40}" x2="242" y2="${60 + i*40}" stroke="#E05A00" stroke-width="2" opacity="0.6"></line>`).join("")}
+          <ellipse cx="140" cy="255" rx="80" ry="20" fill="#C0C0C0" stroke="#A0A0A0" stroke-width="2"></ellipse>
+          <path d="M 60 255 Q 58 275 70 283 Q 90 293 140 296 Q 190 293 210 283 Q 222 275 220 255" fill="#D0D0D0" stroke="#A0A0A0" stroke-width="2"></path>
+          <ellipse cx="140" cy="263" rx="70" ry="17" fill="#F5A347" opacity="0.9"></ellipse>
+          <text x="140" y="90" text-anchor="middle" font-size="12" fill="#E05A00" font-family="monospace">350°F</text>
+        </svg>
+      `;
+    }
+
+    function coolVisual() {
+      return `
+        <svg width="280" height="260" viewBox="0 0 280 260">
+          ${[0,1,2,3,4,5].map(i => `
+            <g>
+              <line x1="${40 + i*40}" y1="20" x2="${40 + i*40}" y2="200" stroke="#999" stroke-width="2"></line>
+              <line x1="20" y1="${30 + i*30}" x2="260" y2="${30 + i*30}" stroke="#bbb" stroke-width="1" stroke-dasharray="4,4"></line>
+            </g>
+          `).join("")}
+          <ellipse cx="140" cy="170" rx="95" ry="22" fill="#C0C0C0" stroke="#A0A0A0" stroke-width="2"></ellipse>
+          <path d="M 45 170 Q 43 205 58 218 Q 80 232 140 236 Q 200 232 222 218 Q 237 205 235 170" fill="#D0D0D0" stroke="#A0A0A0" stroke-width="2"></path>
+          <ellipse cx="140" cy="178" rx="82" ry="18" fill="#F5A347" opacity="0.95"></ellipse>
+          ${["~","~","~"].map((s,i) => `<text x="${100 + i*30}" y="${155 - i*5}" font-size="16" fill="#ccc" opacity="0.7">${s}</text>`).join("")}
+        </svg>
+      `;
+    }
+
+    function doneVisual() {
+      return `
+        <svg width="280" height="240" viewBox="0 0 300 240">
+          <ellipse cx="150" cy="100" rx="100" ry="25" fill="#C0C0C0" stroke="#888" stroke-width="2"></ellipse>
+          <path d="M 50 100 Q 48 148 62 165 Q 82 185 150 190 Q 218 185 238 165 Q 252 148 250 100" fill="#D0D0D0" stroke="#888" stroke-width="2"></path>
+          <ellipse cx="150" cy="112" rx="88" ry="10" fill="#C8A882" stroke="#B8986F" stroke-width="1"></ellipse>
+          <ellipse cx="150" cy="120" rx="85" ry="20" fill="#F5A962" stroke="#E89850" stroke-width="2"></ellipse>
+          <ellipse cx="130" cy="125" rx="30" ry="8" fill="white" opacity="0.3"></ellipse>
+          ${[120,150,180].map((x) => `<circle cx="${x}" cy="118" r="11" fill="#FFFEF0" stroke="#F5F5DC" stroke-width="1"></circle>`).join("")}
+        </svg>
+      `;
+    }
+
+    const VISUALS = { mixer: mixerVisual, pour: pourVisual, oven: ovenVisual, cool: coolVisual, done: doneVisual };
+
+    // ---------- actions ----------
+    function addIngredient(ing) {
+      if (state.used.includes(ing.id)) return;
+
+      state.used = [...state.used, ing.id];
+      state.mixContents = [...state.mixContents, ing];
+
+      state.splatters = [
+        ...state.splatters,
+        {
+          x: Math.random() * 90 + 5,
+          y: Math.random() * 90 + 5,
+          size: Math.random() * 40 + 20,
+          color: ing.color,
+          opacity: Math.random() * 0.5 + 0.3
+        }
+      ];
+
+      state.blending = true;
+      render();
+      setTimeout(() => {
+        state.blending = false;
+        render();
+      }, 900);
+    }
+
+    function completeStep() {
+      state.showReflection = true;
+      render();
+    }
+
+    function continueStep() {
+      state.showReflection = false;
+      state.mixContents = [];
+      state.step = state.step + 1;
+      render();
+    }
+
+    async function saveReflections() {
+      state.saving = true;
+      render();
+      try {
+        await storage.set(STORAGE_KEY, JSON.stringify(state.drafts));
+        state.reflections = [...state.drafts];
+      } catch {}
+      state.saving = false;
+      state.editMode = false;
+      render();
+    }
+
+    function cancelEdit() {
+      state.drafts = [...state.reflections];
+      state.editMode = false;
+      render();
+    }
+
+    // ---------- render ----------
+    function render() {
+      const root = document.getElementById("app");
+      const done = state.step >= steps.length;
+      const cur = steps[state.step] ?? steps[steps.length - 1];
+      const allAdded = (cur.ingredients ?? []).every(i => state.used.includes(i.id));
+      const VisualFn = VISUALS[cur.visual] ?? doneVisual;
+
+      if (state.editMode) {
+        root.innerHTML = `
+          <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg border-2 border-amber-200 p-8">
+            <h2 class="text-2xl font-bold text-amber-900 mb-2">Edit Reflections</h2>
+            <p class="text-amber-600 italic text-sm mb-6">One reflection appears after each of the 8 steps. Changes are saved to your account.</p>
+            <div id="drafts"></div>
+            <div class="flex gap-3 mt-2">
+              <button id="save" class="flex-1 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors">${state.saving ? "Saving…" : "Save & Return"}</button>
+              <button id="cancel" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-3 rounded-lg transition-colors">Cancel</button>
+            </div>
+          </div>
+        `;
+
+        // populate draft editors
+        const draftsHost = document.getElementById("drafts");
+        draftsHost.innerHTML = state.drafts.map((r, i) => `
+          <div class="mb-5">
+            <label class="block text-sm font-semibold text-amber-800 mb-1">Step ${i + 1} — ${steps[i]?.label ?? ""}</label>
+            <textarea data-idx="${i}" class="w-full p-3 border-2 border-amber-200 rounded-lg focus:border-amber-500 focus:outline-none text-sm font-serif min-h-20 resize-y">${r}</textarea>
+          </div>
+        `).join("");
+
+        draftsHost.querySelectorAll("textarea[data-idx]").forEach(el => {
+          el.addEventListener("input", (e) => {
+            const idx = Number(e.target.getAttribute("data-idx"));
+            const next = [...state.drafts];
+            next[idx] = e.target.value;
+            state.drafts = next;
+          });
+        });
+
+        document.getElementById("save").addEventListener("click", () => {
+          if (!state.saving) saveReflections();
+        });
+        document.getElementById("cancel").addEventListener("click", cancelEdit);
+        return;
+      }
+
+      // main UI
+      root.innerHTML = `
+        <div class="max-w-5xl mx-auto">
+          <div class="text-center mb-6">
+            <h1 class="text-3xl md:text-4xl font-bold text-amber-900 mb-1">Fluffy Pumpkin Cheesecake</h1>
+            <p class="text-sm text-amber-600 italic mb-3">A Critical Baking Exploration of (Un)supervised Processes</p>
+            <button id="editReflections" class="text-sm bg-amber-200 hover:bg-amber-300 text-amber-900 px-4 py-1.5 rounded transition-colors">
+              ✏️ Edit Reflections
+            </button>
+          </div>
+
+          <div class="flex gap-1 mb-6">
+            ${steps.map((s, i) => `
+              <div title="${s.label}" class="flex-1 h-2 rounded-full transition-all ${i < state.step ? "bg-amber-600" : i === state.step ? "bg-amber-400" : "bg-amber-100"}"></div>
+            `).join("")}
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="relative bg-white rounded-lg shadow-xl overflow-hidden">
+              <div class="relative p-6 overflow-hidden" style="background: linear-gradient(to bottom,#FFFEF0,#FFFACD);">
+                ${state.splatters.map(s => `
+                  <div class="absolute rounded-full pointer-events-none"
+                       style="left:${s.x}%; top:${s.y}%; width:${s.size}px; height:${s.size}px; background-color:${s.color}; opacity:${s.opacity}; filter:blur(3px);"></div>
+                `).join("")}
+                <div class="relative z-10">
+                  <div class="flex justify-between items-baseline mb-4">
+                    <h2 class="text-lg font-bold text-amber-900">Step ${Math.min(state.step + 1, steps.length)} of ${steps.length}</h2>
+                    <span class="text-sm text-amber-600 font-semibold">${cur.label}</span>
+                  </div>
+                  <p class="text-base text-amber-900 leading-relaxed mb-5 font-medium">${cur.instruction}</p>
+
+                  ${(cur.ingredients ?? []).length > 0 ? `
+                    <div class="mb-4">
+                      <p class="text-sm text-amber-700 italic mb-3">Click each ingredient to add it:</p>
+                      <div class="grid grid-cols-2 gap-3" id="ingredients">
+                        ${cur.ingredients.map(ing => `
+                          <button class="p-3 rounded-lg border-2 flex flex-col items-center transition-all ${state.used.includes(ing.id)
+                            ? "bg-gray-100 border-gray-200 cursor-not-allowed"
+                            : "bg-white border-amber-300 hover:border-amber-500 hover:shadow-md cursor-pointer"}"
+                            data-ing="${ing.id}">
+                            ${ingredientIcon(ing.type, state.used.includes(ing.id))}
+                            <span class="text-xs text-amber-800 mt-2 text-center">${ing.name}</span>
+                          </button>
+                        `).join("")}
+                      </div>
+                    </div>
+                  ` : ""}
+
+                  ${!done && allAdded ? `
+                    <button id="completeStep" class="w-full bg-amber-700 hover:bg-amber-800 text-white font-semibold py-3 rounded-lg transition-colors mt-2">
+                      Complete This Step →
+                    </button>
+                  ` : ""}
+
+                  ${done ? `
+                    <p class="text-center text-amber-800 italic py-4">
+                      The recipe is done, but the anxiety isn't. It never is. At least there's cheesecake.
+                    </p>
+                  ` : ""}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex flex-col items-center justify-center bg-white rounded-lg shadow-xl p-4">
+              <div id="visualHost">${VisualFn(state.mixContents, state.blending)}</div>
+              <p class="text-xs text-amber-500 italic mt-2">${cur.label}</p>
+            </div>
+          </div>
+        </div>
+
+        ${state.showReflection ? `
+          <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-30">
+            <div class="bg-amber-50 p-8 rounded-lg shadow-2xl max-w-lg w-full border-4 border-amber-800">
+              <h3 class="text-xl font-bold text-amber-900 mb-1">Field Notes</h3>
+              <p class="text-xs text-amber-500 italic mb-4">Step ${state.step + 1} — ${cur.label}</p>
+              <p class="text-amber-800 italic leading-relaxed mb-6">${state.reflections[state.step] ?? ""}</p>
+              <button id="continue" class="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3 rounded-lg transition-colors">
+                Continue Baking
+              </button>
+            </div>
+          </div>
+        ` : ""}
+      `;
+
+      // wire up events
+      const editBtn = document.getElementById("editReflections");
+      if (editBtn) {
+        editBtn.addEventListener("click", () => {
+          state.drafts = [...state.reflections];
+          state.editMode = true;
+          render();
+        });
+      }
+
+      const ingHost = document.getElementById("ingredients");
+      if (ingHost) {
+        ingHost.querySelectorAll("[data-ing]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-ing");
+            const ing = (cur.ingredients || []).find(x => x.id === id);
+            if (ing && !state.used.includes(ing.id)) addIngredient(ing);
+          });
+        });
+      }
+
+      const completeBtn = document.getElementById("completeStep");
+      if (completeBtn) completeBtn.addEventListener("click", completeStep);
+
+      const cont = document.getElementById("continue");
+      if (cont) cont.addEventListener("click", continueStep);
+    }
+
+    // ---------- init: load reflections from storage then render ----------
+    (async function init() {
+      try {
+        const res = await storage.get(STORAGE_KEY);
+        if (res?.value) {
+          const saved = JSON.parse(res.value);
+          if (Array.isArray(saved) && saved.length === DEFAULT_REFLECTIONS.length) {
+            state.reflections = [...saved];
+            state.drafts = [...saved];
+          }
+        }
+      } catch {}
+      state.storageReady = true;
+      render();
+    })();
+  </script>
+</body>
+</html>
+``
